@@ -76,7 +76,7 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
             try {
                 // Nếu camera cũ chưa giải phóng, đợi thêm
                 if (camera != null) {
-                    Log.w(TAG, "Camera instance not null, releasing before reopen...");
+                    Log.d(TAG, "Camera instance not null, releasing before reopen...");
                     camera.release();
                     camera = null;
                     Thread.sleep(200);
@@ -85,7 +85,7 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
                 // Đợi surfaceTexture thật sự sẵn sàng
                 SurfaceTexture surface = textureView.getSurfaceTexture();
                 if (surface == null) {
-                    Log.w(TAG, "SurfaceTexture not ready yet, retrying in 300ms...");
+                    Log.d(TAG, "SurfaceTexture not ready yet, retrying in 300ms...");
                     bgHandler.postDelayed(this::openCamera, 300);
                     return;
                 }
@@ -94,12 +94,13 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
                 Log.d(TAG, "Opening Camera1...");
 
                 try {
-                    camera = Camera.openLegacy(0, android.hardware.Camera.CAMERA_HAL_API_VERSION_1_0);
+                    // camera = Camera.openLegacy(0, android.hardware.Camera.CAMERA_HAL_API_VERSION_1_0);
+                    camera = Camera.open(0);
                 } catch (Exception e) {
-                    emitError("openLegacy failed: " + e.getMessage());
+                    emitError("openCamera failed: " + e.getMessage());
                 }
 
-                // camera = Camera.open(0);
+               
     
                 if (camera == null) {
                     emitError("Camera.open() returned null");

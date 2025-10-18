@@ -14,6 +14,6 @@ public class SevenMDPackage implements ReactPackage {
   }
 
   @Override public List<ViewManager> createViewManagers(ReactApplicationContext context) {
-    return Arrays.<ViewManager>asList(new SevenMDCameraViewManager());
+    return Arrays.<ViewManager>asList(new SevenMDCameraViewManager(context));
   }
 }
