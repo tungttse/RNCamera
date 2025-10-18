@@ -66,36 +66,78 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     }
 
     private void openCamera() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.CAMERA)
+        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Camera permission not granted");
+            emitError("Camera permission not granted");
+            return;
+        }
         bgHandler.post(() -> {
             try {
-                camera = Camera.open(0); // back camera
+                // Nếu camera cũ chưa giải phóng, đợi thêm
+                if (camera != null) {
+                    Log.w(TAG, "Camera instance not null, releasing before reopen...");
+                    camera.release();
+                    camera = null;
+                    Thread.sleep(200);
+                }
+    
+                // Đợi surfaceTexture thật sự sẵn sàng
+                SurfaceTexture surface = textureView.getSurfaceTexture();
+                if (surface == null) {
+                    Log.w(TAG, "SurfaceTexture not ready yet, retrying in 300ms...");
+                    bgHandler.postDelayed(this::openCamera, 300);
+                    return;
+                }
+    
+                // Mở camera
+                Log.d(TAG, "Opening Camera1...");
+
+                try {
+                    camera = Camera.openLegacy(0, android.hardware.Camera.CAMERA_HAL_API_VERSION_1_0);
+                } catch (Exception e) {
+                    emitError("openLegacy failed: " + e.getMessage());
+                }
+
+                // camera = Camera.open(0);
+    
                 if (camera == null) {
                     emitError("Camera.open() returned null");
                     return;
                 }
-                camera.setPreviewTexture(textureView.getSurfaceTexture());
+    
+                camera.setPreviewTexture(surface);
                 camera.startPreview();
                 emitCameraReady();
                 Log.d(TAG, "Camera1 opened successfully");
+    
+            } catch (RuntimeException e) {
+                Log.e(TAG, "Runtime error opening camera: " + e.getMessage());
+                emitError("RuntimeException: " + e.getMessage());
             } catch (Exception e) {
                 Log.e(TAG, "Failed to open Camera1: " + e.getMessage());
                 emitError("openCamera failed: " + e.getMessage());
             }
         });
     }
+    
 
     private void closeCamera() {
         if (camera != null) {
             try {
                 camera.stopPreview();
+            } catch (Exception ignored) {}
+            try {
                 camera.release();
-                camera = null;
                 Log.d(TAG, "Camera released");
             } catch (Exception e) {
-                Log.e(TAG, "Error closing camera: " + e.getMessage());
+                Log.e(TAG, "Error releasing camera: " + e.getMessage());
+            } finally {
+                camera = null;
             }
         }
     }
+    
 
     // endregion
 
@@ -142,7 +184,9 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
         Log.d(TAG, "Surface available, starting camera...");
         startBgThread();
-        openCamera();
+
+        // Trì hoãn một chút trước khi mở camera để tránh lỗi SurfaceTexture not ready yet  
+        bgHandler.postDelayed(this::openCamera, 300);
     }
 
     @Override
