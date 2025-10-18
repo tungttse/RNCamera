@@ -1,350 +1,189 @@
 package com.reactnative.SevenMDCamera;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
-import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
-import android.hardware.camera2.*;
-import android.media.Image;
-import android.media.ImageReader;
-import android.os.Environment;
+import android.hardware.Camera;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
-import android.util.Size;
-import android.view.Surface;
 import android.view.TextureView;
 import android.widget.FrameLayout;
 
+import androidx.annotation.Nullable;
+
 import com.facebook.react.bridge.Arguments;
-import com.facebook.react.bridge.WritableMap;
-import com.facebook.react.uimanager.UIManagerHelper;
 import com.facebook.react.bridge.ReactContext;
+import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.uimanager.events.RCTEventEmitter;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.nio.ByteBuffer;
-import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.Locale;
+import java.io.IOException;
 
-public class SevenMDCameraView extends FrameLayout {
-    private static final String TAG = "SevenMDCamera";
+/**
+ * Camera view using old Camera1 API for better compatibility on Android 7–10 devices.
+ */
+public class SevenMDCameraView extends FrameLayout implements TextureView.SurfaceTextureListener {
+    private static final String TAG = "SevenMDCameraView";
+
     private TextureView textureView;
-    private CameraDevice cameraDevice;
-    private CameraCaptureSession captureSession;
-    private CaptureRequest.Builder previewBuilder;
+    private Camera camera;
     private HandlerThread bgThread;
     private Handler bgHandler;
-    private ImageReader imageReader;
-    private Size previewSize;
-    private String cameraId;
-    private static int activeCameras = 0;
+    private final ReactContext reactContext;
 
     public SevenMDCameraView(Context context) {
         super(context);
-        Log.d(TAG, "SevenMDCameraView constructor called");
-        textureView = new TextureView(context);
+        this.reactContext = (ReactContext) context;
+        init();
+    }
+
+    private void init() {
+        textureView = new TextureView(getContext());
         addView(textureView);
-        textureView.setSurfaceTextureListener(surfaceListener);
-        Log.d(TAG, "TextureView created and surface listener set");
+        textureView.setSurfaceTextureListener(this);
     }
 
-    private final TextureView.SurfaceTextureListener surfaceListener = new TextureView.SurfaceTextureListener() {
-        @Override
-        public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-            Log.d(TAG, "onSurfaceTextureAvailable called - width: " + width + ", height: " + height);
-            startBgThread();
-
-            Handler mainHandler = new Handler(Looper.getMainLooper());
-            mainHandler.postDelayed(() -> {
-                Log.d(TAG, "Opening camera after delay");
-                openCamera();
-            }, 1000);
-        }
-
-        @Override
-        public void onSurfaceTextureSizeChanged(SurfaceTexture s, int w, int h) {
-        }
-
-        @Override
-        public boolean onSurfaceTextureDestroyed(SurfaceTexture s) {
-            Log.d(TAG, "onSurfaceTextureDestroyed called - closing camera and stopping background thread");
-            closeCamera();
-            stopBgThread();
-            return true;
-        }
-
-        @Override
-        public void onSurfaceTextureUpdated(SurfaceTexture s) {
-        }
-    };
-
-    @Override
-    public void onAttachedToWindow() { 
-        super.onAttachedToWindow();
-        Log.d(TAG, "onAttachedToWindow");
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        super.onDetachedFromWindow();
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private void openCamera() {
-        if (activeCameras >= 2) {
-            Log.d(TAG, "Max number of cameras reached, skipping camera opening");
-            return;
-        }
-        activeCameras++;
-
-        Log.d(TAG, "openCamera called");
-        try {
-            CameraManager manager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
-            Log.d(TAG, "CameraManager obtained");
-            for (String id : manager.getCameraIdList()) {
-                CameraCharacteristics cc = manager.getCameraCharacteristics(id);
-                if (cc.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
-
-                    int level = cc.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
-                    Log.d(TAG, "Camera " + id + " support level: " + level);
-                    if (level != CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL) {
-                        Log.d(TAG, "Camera " + id + " is not a full-featured camera, skipping");
-                        continue;
-                    }
-
-                    if(level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED) {
-                        Log.d(TAG, "Camera " + id + " is a camera 1");
-                    }
-                    
-                    cameraId = id;
-                    Log.d(TAG, "Found back camera with ID: " + cameraId);
-                    break;
-                }
-            }
-            Log.d(TAG, "Opening camera with ID: " + cameraId);
-
-            if (cameraDevice != null) {
-                Log.d(TAG, "Closing previous camera before opening new one");
-                cameraDevice.close();
-                cameraDevice = null;
-            }
-
-            manager.openCamera(cameraId, stateCallback, bgHandler);
-        } catch (Exception e) {
-            Log.e(TAG, "Error opening camera: " + e.getMessage(), e);
-            emitError(e.getMessage());
-        }
-    }
-
-    private final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
-        @Override
-        public void onOpened(CameraDevice camera) {
-            Log.d(TAG, "Camera opened successfully");
-            cameraDevice = camera;
-            startPreview();
-            emitCameraReady();
-        }
-
-        @Override
-        public void onDisconnected(CameraDevice camera) {
-            Log.d(TAG, "Camera disconnected - closing camera");
-            camera.close();
-            cameraDevice = null;
-        }
-
-        @Override
-        public void onError(CameraDevice camera, int error) {
-            Log.e(TAG, "Camera error occurred: " + error);
-            emitError("camera error: " + error);
-            camera.close();
-            cameraDevice = null;
-        }
-    };
-
-    private void startPreview() {
-        Log.d(TAG, "startPreview called");
-        try {
-            SurfaceTexture texture = textureView.getSurfaceTexture();
-            if (texture == null) {
-                Log.w(TAG, "SurfaceTexture is null, cannot start preview");
-                return;
-            }
-
-            Log.d(TAG, "Setting default buffer size to 1920x1080");
-            texture.setDefaultBufferSize(1920, 1080);
-            Surface surface = new Surface(texture);
-
-            Log.d(TAG, "Creating ImageReader for JPEG capture");
-            imageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 2);
-            imageReader.setOnImageAvailableListener(reader -> saveImage(reader), bgHandler);
-
-            Log.d(TAG, "Creating capture request builder for preview");
-            previewBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            previewBuilder.addTarget(surface);
-
-            Log.d(TAG, "Creating capture session");
-            cameraDevice.createCaptureSession(
-                    Arrays.asList(surface, imageReader.getSurface()),
-                    new CameraCaptureSession.StateCallback() {
-                        @Override
-                        public void onConfigured(CameraCaptureSession session) {
-                            Log.d(TAG, "Capture session configured successfully");
-                            captureSession = session;
-                            try {
-                                previewBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-                                captureSession.setRepeatingRequest(previewBuilder.build(), null, bgHandler);
-                                Log.d(TAG, "Preview started with repeating request");
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error setting repeating request: " + e.getMessage(), e);
-                                emitError(e.getMessage());
-                            }
-                        }
-
-                        @Override
-                        public void onConfigureFailed(CameraCaptureSession session) {
-                            Log.e(TAG, "Capture session configuration failed");
-                            emitError("config failed");
-                        }
-                    }, bgHandler);
-        } catch (Exception e) {
-            Log.e(TAG, "Error in startPreview: " + e.getMessage(), e);
-            emitError(e.getMessage());
-        }
-    }
-
-    public void takePicture() {
-        Log.d(TAG, "takePicture called");
-        try {
-            if (cameraDevice == null || captureSession == null) {
-                Log.w(TAG, "Camera not ready - cameraDevice: " + (cameraDevice != null) + ", captureSession: "
-                        + (captureSession != null));
-                emitError("Camera not ready");
-                return;
-            }
-            Log.d(TAG, "Creating capture request for still capture");
-            CaptureRequest.Builder captureBuilder = cameraDevice
-                    .createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureBuilder.addTarget(imageReader.getSurface());
-            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-            Log.d(TAG, "Capturing picture");
-            captureSession.capture(captureBuilder.build(), null, bgHandler);
-        } catch (Exception e) {
-            Log.e(TAG, "Error taking picture: " + e.getMessage(), e);
-            emitError(e.getMessage());
-        }
-    }
-
-    private void saveImage(ImageReader reader) {
-        Log.d(TAG, "saveImage called");
-        Image image = null;
-        try {
-            image = reader.acquireNextImage();
-            Log.d(TAG, "Image acquired from reader");
-            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            Log.d(TAG, "Image data extracted, size: " + bytes.length + " bytes");
-
-            File dir = new File(getContext().getCacheDir(), "camera");
-            if (!dir.exists()) {
-                Log.d(TAG, "Creating camera directory: " + dir.getAbsolutePath());
-                dir.mkdirs();
-            }
-            String name = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File file = new File(dir, name + ".jpg");
-            Log.d(TAG, "Saving image to: " + file.getAbsolutePath());
-
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(bytes);
-            fos.close();
-            Log.d(TAG, "Image saved successfully");
-
-            emitPictureSaved(file.getAbsolutePath());
-        } catch (Exception e) {
-            Log.e(TAG, "Error saving image: " + e.getMessage(), e);
-            emitError(e.getMessage());
-        } finally {
-            if (image != null) {
-                Log.d(TAG, "Closing image");
-                image.close();
-            }
-        }
-    }
+    // region --- Lifecycle and Camera Control ---
 
     private void startBgThread() {
-        Log.d(TAG, "Starting background thread");
-        bgThread = new HandlerThread("BG");
+        bgThread = new HandlerThread("CameraBackground");
         bgThread.start();
         bgHandler = new Handler(bgThread.getLooper());
-        Log.d(TAG, "Background thread started successfully");
     }
 
     private void stopBgThread() {
-        Log.d(TAG, "Stopping background thread");
         if (bgThread != null) {
             bgThread.quitSafely();
             try {
                 bgThread.join();
-                Log.d(TAG, "Background thread stopped successfully");
-            } catch (Exception ignored) {
-                Log.w(TAG, "Exception while joining background thread", ignored);
+            } catch (InterruptedException e) {
+                Log.e(TAG, "Error stopping background thread", e);
             }
             bgThread = null;
             bgHandler = null;
         }
     }
 
-    private void closeCamera() {
-        Log.d(TAG, "closeCamera called");
-        if (captureSession != null) {
-            Log.d(TAG, "Closing capture session");
-            captureSession.close();
-        }
-        if (cameraDevice != null) {
-            Log.d(TAG, "Closing camera device");
-            cameraDevice.close();
-        }
-        if (imageReader != null) {
-            Log.d(TAG, "Closing image reader");
-            imageReader.close();
-        }
-        Log.d(TAG, "Camera closed successfully");
+    private void openCamera() {
+        bgHandler.post(() -> {
+            try {
+                camera = Camera.open(0); // back camera
+                if (camera == null) {
+                    emitError("Camera.open() returned null");
+                    return;
+                }
+                camera.setPreviewTexture(textureView.getSurfaceTexture());
+                camera.startPreview();
+                emitCameraReady();
+                Log.d(TAG, "Camera1 opened successfully");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to open Camera1: " + e.getMessage());
+                emitError("openCamera failed: " + e.getMessage());
+            }
+        });
     }
+
+    private void closeCamera() {
+        if (camera != null) {
+            try {
+                camera.stopPreview();
+                camera.release();
+                camera = null;
+                Log.d(TAG, "Camera released");
+            } catch (Exception e) {
+                Log.e(TAG, "Error closing camera: " + e.getMessage());
+            }
+        }
+    }
+
+    // endregion
+
+    // region --- Capture ---
+
+    public void capture() {
+        if (camera == null) {
+            emitError("capture called but camera == null");
+            return;
+        }
+
+        try {
+            camera.takePicture(null, null, (data, cam) -> {
+                File file = new File(getContext().getCacheDir(), "photo_" + System.currentTimeMillis() + ".jpg");
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    fos.write(data);
+                    fos.flush();
+
+                    WritableMap map = Arguments.createMap();
+                    map.putString("uri", "file://" + file.getAbsolutePath());
+                    emitPictureSaved(map);
+                    Log.d(TAG, "Picture saved: " + file.getAbsolutePath());
+                } catch (IOException e) {
+                    emitError("Error saving picture: " + e.getMessage());
+                }
+
+                // restart preview
+                try {
+                    cam.startPreview();
+                } catch (Exception ex) {
+                    Log.e(TAG, "Failed to restart preview: " + ex.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            emitError("capture() failed: " + e.getMessage());
+        }
+    }
+
+    // endregion
+
+    // region --- TextureView Callbacks ---
+
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        Log.d(TAG, "Surface available, starting camera...");
+        startBgThread();
+        openCamera();
+    }
+
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
+
+    @Override
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+        Log.d(TAG, "Surface destroyed, closing camera...");
+        closeCamera();
+        stopBgThread();
+        return true;
+    }
+
+    @Override
+    public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
+
+    // endregion
+
+    // region --- React Event Emitters ---
 
     private void emitCameraReady() {
-        Log.d(TAG, "Emitting camera ready event");
-        ReactContext reactContext = (ReactContext) getContext();
-        reactContext
-                .getJSModule(RCTEventEmitter.class)
-                .receiveEvent(getId(), "onCameraReady", null);
+        WritableMap event = Arguments.createMap();
+        event.putString("status", "ready");
+        sendEvent("onCameraReady", event);
     }
 
-    private void emitPictureSaved(String path) {
-        Log.d(TAG, "Emitting picture saved event with path: " + path);
-        ReactContext reactContext = (ReactContext) getContext();
-        WritableMap map = Arguments.createMap();
-        map.putString("path", path);
-        reactContext
-                .getJSModule(RCTEventEmitter.class)
-                .receiveEvent(getId(), "onPictureSaved", map);
+    private void emitError(String message) {
+        WritableMap event = Arguments.createMap();
+        event.putString("error", message);
+        sendEvent("onError", event);
     }
 
-    private void emitError(String msg) {
-        Log.e(TAG, "Emitting error event: " + msg);
-        ReactContext reactContext = (ReactContext) getContext();
-        WritableMap map = Arguments.createMap();
-        map.putString("message", msg);
+    private void emitPictureSaved(WritableMap data) {
+        sendEvent("onPictureSaved", data);
+    }
+
+    private void sendEvent(String eventName, @Nullable WritableMap event) {
         reactContext
                 .getJSModule(RCTEventEmitter.class)
-                .receiveEvent(getId(), "onError", map);
+                .receiveEvent(getId(), eventName, event);
     }
+
+    // endregion
 }
