@@ -41,6 +41,7 @@ public class SevenMDCameraView extends FrameLayout {
     private ImageReader imageReader;
     private Size previewSize;
     private String cameraId;
+    private static int activeCameras = 0;
 
     public SevenMDCameraView(Context context) {
         super(context);
@@ -82,6 +83,12 @@ public class SevenMDCameraView extends FrameLayout {
     };
 
     @Override
+    public void onAttachedToWindow() { 
+        super.onAttachedToWindow();
+        Log.d(TAG, "onAttachedToWindow");
+    }
+
+    @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         if (cameraDevice != null) {
@@ -92,6 +99,12 @@ public class SevenMDCameraView extends FrameLayout {
 
     @SuppressLint("MissingPermission")
     private void openCamera() {
+        if (activeCameras >= 2) {
+            Log.d(TAG, "Max number of cameras reached, skipping camera opening");
+            return;
+        }
+        activeCameras++;
+
         Log.d(TAG, "openCamera called");
         try {
             CameraManager manager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
@@ -99,6 +112,18 @@ public class SevenMDCameraView extends FrameLayout {
             for (String id : manager.getCameraIdList()) {
                 CameraCharacteristics cc = manager.getCameraCharacteristics(id);
                 if (cc.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+
+                    int level = cc.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+                    Log.d(TAG, "Camera " + id + " support level: " + level);
+                    if (level != CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL) {
+                        Log.d(TAG, "Camera " + id + " is not a full-featured camera, skipping");
+                        continue;
+                    }
+
+                    if(level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED) {
+                        Log.d(TAG, "Camera " + id + " is a camera 1");
+                    }
+                    
                     cameraId = id;
                     Log.d(TAG, "Found back camera with ID: " + cameraId);
                     break;
