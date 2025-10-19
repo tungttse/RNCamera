@@ -7,13 +7,16 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.ArrayList;
 
 public class SevenMDPackage implements ReactPackage {
-  @Override public List<NativeModule> createNativeModules(ReactApplicationContext context) {
-    return Collections.emptyList();
+  @Override public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
+    List<NativeModule> modules = new ArrayList<>();
+    modules.add(new SevenMDCameraModule(reactContext)); // ✅ đăng ký module ở đây
+    return modules;
   }
 
-  @Override public List<ViewManager> createViewManagers(ReactApplicationContext context) {
-    return Arrays.<ViewManager>asList(new SevenMDCameraViewManager(context));
+  @Override public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
+    return Arrays.<ViewManager>asList(new SevenMDCameraViewManager(reactContext));
   }
 }

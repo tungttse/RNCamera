@@ -16,6 +16,8 @@ import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.uimanager.events.RCTEventEmitter;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReactMethod;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -289,7 +291,8 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     // endregion
 
     // region ===== Capture =====
-    public void capture() {
+    @ReactMethod
+    public void capture(Promise promise) {
         Log.d(TAG, "[capture] Bắt đầu chụp...");
         if (camera == null) {
             Log.e(TAG, "[capture] Bỏ qua: camera == null");
@@ -308,12 +311,15 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
 
                     WritableMap map = Arguments.createMap();
                     map.putString("uri", "file://" + file.getAbsolutePath());
+                    
                     emitPictureSaved(map);
                     Log.d(TAG, "📸 [capture/callback] Emit onPictureSaved");
+                    promise.resolve(map);
 
                 } catch (IOException e) {
                     Log.e(TAG, "⛔ [capture/callback] Lỗi lưu ảnh: " + e.getMessage(), e);
                     emitError("Error saving picture: " + e.getMessage());
+                    promise.reject(e);
                 }
 
                 try {
@@ -323,11 +329,13 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
                 } catch (Exception ex) {
                     isPreviewActive = false;
                     Log.e(TAG, "⛔ [capture/callback] Failed to restart preview: " + ex.getMessage(), ex);
+                    promise.reject(ex);
                 }
             });
         } catch (Exception e) {
             Log.e(TAG, "⛔ [capture] Lỗi takePicture(): " + e.getMessage(), e);
             emitError("capture() failed: " + e.getMessage());
+            promise.reject(e);
         }
     }
     // endregion

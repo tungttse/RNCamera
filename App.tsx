@@ -33,7 +33,7 @@ function AppContent() {
     if (cameraRef.current) {
       // @ts-ignore
       Alert.alert("capture");
-      cameraRef.current.takePicture();
+      cameraRef.current.takePhoto();
     }
   };
 

@@ -15,7 +15,6 @@ import java.util.HashMap;
  * React Native ViewManager cho SevenMDCameraView (Camera1)
  */
 public class SevenMDCameraViewManager extends SimpleViewManager<SevenMDCameraView> {
-    public static final String REACT_CLASS = "SevenMDCamera";
     private static final int COMMAND_CAPTURE = 1;
 
     private final ReactApplicationContext reactContext;
@@ -27,13 +26,15 @@ public class SevenMDCameraViewManager extends SimpleViewManager<SevenMDCameraVie
     @NonNull
     @Override
     public String getName() {
-        return REACT_CLASS;
+        return "SevenMDCamera";
     }
 
     @NonNull
     @Override
-    protected SevenMDCameraView createViewInstance(@NonNull ThemedReactContext context) {
-        return new SevenMDCameraView(context);
+    protected SevenMDCameraView createViewInstance(@NonNull ThemedReactContext reactContext) {
+        SevenMDCameraView view = new SevenMDCameraView(reactContext);
+        SevenMDCameraModule.setCameraViewRef(view);
+        return view;
     }
 
     /**
@@ -43,24 +44,11 @@ public class SevenMDCameraViewManager extends SimpleViewManager<SevenMDCameraVie
     @Override
     public Map<String, Integer> getCommandsMap() {
         Map<String, Integer> map = new HashMap<>();
-        map.put("capture", COMMAND_CAPTURE);
+        map.put("takePhoto", COMMAND_CAPTURE);
         return map;
     }
 
-    /**
-     * Xử lý lệnh từ JS
-     */
-    @Override
-    public void receiveCommand(
-            @NonNull SevenMDCameraView view,
-            String commandId,
-            @Nullable ReadableArray args
-    ) {
-        if ("capture".equals(commandId)) {
-            view.capture();
-        }
-    }
-
+  
     /**
      * Các event native gửi sang JS
      */
