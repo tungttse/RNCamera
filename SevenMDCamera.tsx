@@ -1,9 +1,9 @@
-import React, { forwardRef, useImperativeHandle, useRef } from "react";
+import React, { forwardRef, useImperativeHandle, useRef, memo } from "react";
 import { requireNativeComponent, UIManager, findNodeHandle } from "react-native";
 
 const NativeCamera = requireNativeComponent("SevenMDCamera");
 
-export const SevenMDCamera = forwardRef((props: any, ref) => {
+export const SevenMDCamera = memo(forwardRef((props: any, ref) => {
   const nativeRef = useRef(null);
   useImperativeHandle(ref, () => ({
     takePicture: () => {
@@ -18,4 +18,6 @@ export const SevenMDCamera = forwardRef((props: any, ref) => {
     },
   }));
   return <NativeCamera ref={nativeRef} {...props} />;
-});
+}), 
+() => true
+);
