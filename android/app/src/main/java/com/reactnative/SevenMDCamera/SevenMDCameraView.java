@@ -335,6 +335,10 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     // region ===== TextureView Callbacks (Google Camera1 lifecycle) =====
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        if(camera != null) {
+            Log.d(TAG, "[onSurfaceTextureAvailable] da co camera roi, return...");
+            return;
+        }
         Log.d(TAG, "[onSurfaceTextureAvailable] Surface có sẵn: w=" + width + ", h=" + height);
         surfaceWasDestroyed = false;
         isSurfaceReady = true;
@@ -354,7 +358,7 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
                 Log.d(TAG, "[onSurfaceTextureAvailable] camera!=null → restartPreviewIfNeeded()");
                 restartPreviewIfNeeded();
             }
-        }, 400);
+        }, 500);
     }
 
     @Override
