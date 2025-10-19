@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.util.Log;
 import android.view.TextureView;
 import android.widget.FrameLayout;
@@ -21,7 +22,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 /**
- * Camera view using old Camera1 API for better compatibility on Android 7–10 devices.
+ * SevenMDCameraView — Safe Camera1 implementation optimized for MediaTek devices.
+ * Handles open/close race conditions, background threads, and HAL retry logic.
  */
 public class SevenMDCameraView extends FrameLayout implements TextureView.SurfaceTextureListener {
     private static final String TAG = "SevenMDCameraView";
@@ -31,6 +33,10 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     private HandlerThread bgThread;
     private Handler bgHandler;
     private final ReactContext reactContext;
+
+    private boolean isOpening = false;
+    private boolean isSurfaceReady = false;
+    private int retryCount = 0;
 
     public SevenMDCameraView(Context context) {
         super(context);
@@ -42,14 +48,16 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
         textureView = new TextureView(getContext());
         addView(textureView);
         textureView.setSurfaceTextureListener(this);
+        Log.d(TAG, "Camera view initialized");
     }
 
-    // region --- Lifecycle and Camera Control ---
-
+    // region ===== Background Thread =====
     private void startBgThread() {
+        if (bgThread != null) return;
         bgThread = new HandlerThread("CameraBackground");
         bgThread.start();
         bgHandler = new Handler(bgThread.getLooper());
+        Log.d(TAG, "Background thread started");
     }
 
     private void stopBgThread() {
@@ -62,97 +70,81 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
             }
             bgThread = null;
             bgHandler = null;
+            Log.d(TAG, "Background thread stopped");
         }
     }
+    // endregion
 
-    private void openCamera() {
-        if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.CAMERA)
-        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "Camera permission not granted");
-            emitError("Camera permission not granted");
+    // region ===== Camera Control =====
+    private synchronized void openCameraSafe() {
+        if (camera != null || isOpening) {
+            Log.w(TAG, "Camera already opening/opened, skipping.");
             return;
         }
-        bgHandler.post(() -> {
-            try {
-                // Nếu camera cũ chưa giải phóng, đợi thêm
-                if (camera != null) {
-                    Log.d(TAG, "Camera instance not null, releasing before reopen...");
-                    camera.release();
-                    camera = null;
-                    Thread.sleep(200);
-                }
-    
-                // Đợi surfaceTexture thật sự sẵn sàng
-                SurfaceTexture surface = textureView.getSurfaceTexture();
-                if (surface == null) {
-                    Log.d(TAG, "SurfaceTexture not ready yet, retrying in 300ms...");
-                    bgHandler.postDelayed(this::openCamera, 300);
-                    return;
-                }
-    
-                // Mở camera
-                Log.d(TAG, "Opening Camera1...");
+        isOpening = true;
 
-                try {
-                    // camera = Camera.openLegacy(0, android.hardware.Camera.CAMERA_HAL_API_VERSION_1_0);
-                    camera = Camera.open(0);
-                } catch (Exception e) {
-                    emitError("openCamera failed: " + e.getMessage());
-                }
+        try {
+            Log.d(TAG, "Attempting to open Camera1...");
+            camera = Camera.open(0); // back camera
 
-               
-    
-                if (camera == null) {
-                    emitError("Camera.open() returned null");
-                    return;
-                }
-    
-                camera.setPreviewTexture(surface);
-                camera.startPreview();
-                emitCameraReady();
-                Log.d(TAG, "Camera1 opened successfully");
-    
-            } catch (RuntimeException e) {
-                Log.e(TAG, "Runtime error opening camera: " + e.getMessage());
-                emitError("RuntimeException: " + e.getMessage());
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to open Camera1: " + e.getMessage());
-                emitError("openCamera failed: " + e.getMessage());
+            if (camera == null) {
+                emitError("Camera.open() returned null");
+                return;
             }
-        });
-    }
-    
 
-    private void closeCamera() {
+            camera.setPreviewTexture(textureView.getSurfaceTexture());
+            camera.startPreview();
+            emitCameraReady();
+            retryCount = 0;
+            Log.d(TAG, "✅ Camera opened successfully");
+
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : "unknown";
+            Log.e(TAG, "❌ Failed to open Camera1: " + msg);
+
+            if (msg.contains("Fail to connect to camera service") && retryCount < 3) {
+                retryCount++;
+                Log.w(TAG, "Camera service busy, retrying in 1s... (" + retryCount + ")");
+                new Handler(Looper.getMainLooper()).postDelayed(this::openCameraSafe, 1000);
+            } else {
+                emitError("openCamera failed: " + msg);
+            }
+
+        } finally {
+            isOpening = false;
+        }
+    }
+
+    private synchronized void closeCameraSafe() {
         if (camera != null) {
             try {
                 camera.stopPreview();
             } catch (Exception ignored) {}
             try {
+                camera.setPreviewCallback(null);
+            } catch (Exception ignored) {}
+            try {
                 camera.release();
-                Log.d(TAG, "Camera released");
+                Log.d(TAG, "Camera released cleanly");
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing camera: " + e.getMessage());
-            } finally {
-                camera = null;
             }
+            camera = null;
         }
     }
-    
-
     // endregion
 
-    // region --- Capture ---
-
+    // region ===== Capture =====
     public void capture() {
         if (camera == null) {
-            emitError("capture called but camera == null");
+            emitError("capture() called but camera == null");
             return;
         }
 
         try {
             camera.takePicture(null, null, (data, cam) -> {
-                File file = new File(getContext().getCacheDir(), "photo_" + System.currentTimeMillis() + ".jpg");
+                File file = new File(getContext().getCacheDir(),
+                        "photo_" + System.currentTimeMillis() + ".jpg");
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     fos.write(data);
                     fos.flush();
@@ -160,12 +152,11 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
                     WritableMap map = Arguments.createMap();
                     map.putString("uri", "file://" + file.getAbsolutePath());
                     emitPictureSaved(map);
-                    Log.d(TAG, "Picture saved: " + file.getAbsolutePath());
+                    Log.d(TAG, "📸 Picture saved: " + file.getAbsolutePath());
                 } catch (IOException e) {
                     emitError("Error saving picture: " + e.getMessage());
                 }
 
-                // restart preview
                 try {
                     cam.startPreview();
                 } catch (Exception ex) {
@@ -176,18 +167,22 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
             emitError("capture() failed: " + e.getMessage());
         }
     }
-
     // endregion
 
-    // region --- TextureView Callbacks ---
-
+    // region ===== TextureView Callbacks =====
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        Log.d(TAG, "Surface available, starting camera...");
+        Log.d(TAG, "Surface available, scheduling camera open...");
+        isSurfaceReady = true;
         startBgThread();
 
-        // Trì hoãn một chút trước khi mở camera để tránh lỗi SurfaceTexture not ready yet  
-        bgHandler.postDelayed(this::openCamera, 300);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (!isSurfaceReady) {
+                Log.w(TAG, "Surface lost before open, skipping openCamera.");
+                return;
+            }
+            openCameraSafe();
+        }, 800); // delay 800ms for MediaTek HAL stabilization
     }
 
     @Override
@@ -196,18 +191,19 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     @Override
     public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
         Log.d(TAG, "Surface destroyed, closing camera...");
-        closeCamera();
+        isSurfaceReady = false;
+
+        // delay 300ms to ensure HAL finishes pending ops
+        new Handler(Looper.getMainLooper()).postDelayed(this::closeCameraSafe, 300);
         stopBgThread();
         return true;
     }
 
     @Override
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
-
     // endregion
 
-    // region --- React Event Emitters ---
-
+    // region ===== React Events =====
     private void emitCameraReady() {
         WritableMap event = Arguments.createMap();
         event.putString("status", "ready");
@@ -225,10 +221,8 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
     }
 
     private void sendEvent(String eventName, @Nullable WritableMap event) {
-        reactContext
-                .getJSModule(RCTEventEmitter.class)
+        reactContext.getJSModule(RCTEventEmitter.class)
                 .receiveEvent(getId(), eventName, event);
     }
-
     // endregion
 }
