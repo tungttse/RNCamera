@@ -1,23 +1,27 @@
 import React, { forwardRef, useImperativeHandle, useRef, memo } from "react";
-import { requireNativeComponent, UIManager, findNodeHandle } from "react-native";
+import { requireNativeComponent, NativeModules } from "react-native";
 
 const NativeCamera = requireNativeComponent("SevenMDCamera");
+const { SevenMDCameraModule } = NativeModules;
 
-export const SevenMDCamera = memo(forwardRef((props: any, ref) => {
-  const nativeRef = useRef(null);
-  useImperativeHandle(ref, () => ({
-    takePicture: () => {
-      const viewId = findNodeHandle(nativeRef.current);
-      // @ts-ignore
-      UIManager.dispatchViewManagerCommand(
-        viewId,
-        // @ts-ignore
-        UIManager.getViewManagerConfig("SevenMDCamera").Commands.takePicture,
-        []
-      );
-    },
-  }));
-  return <NativeCamera ref={nativeRef} {...props} />;
-}), 
-() => true
+export const SevenMDCamera = memo(
+  forwardRef((props, ref) => {
+    const nativeRef = useRef(null);
+
+    useImperativeHandle(ref, () => ({
+      async takePhoto() {
+        try {
+          const result = await SevenMDCameraModule.capture();
+          console.log("🎉 Capture result:", result);
+          return result; // { uri: "file://..." }
+        } catch (err) {
+          console.error("Capture error:", err);
+          throw err;
+        }
+      },
+    }));
+
+    return <NativeCamera ref={nativeRef} {...props} />;
+  }),
+  () => true
 );
