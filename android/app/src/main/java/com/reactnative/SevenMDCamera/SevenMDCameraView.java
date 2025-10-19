@@ -37,7 +37,7 @@ import android.Manifest;
  */
 @SuppressWarnings("deprecation")
 public class SevenMDCameraView extends FrameLayout implements TextureView.SurfaceTextureListener {
-    private static final String TAG = "ttt";
+    private static final String TAG = "tt                                 t";
 
     // region ===== UI / Context =====
     private final ReactContext reactContext;
@@ -311,11 +311,13 @@ public class SevenMDCameraView extends FrameLayout implements TextureView.Surfac
 
                     WritableMap map = Arguments.createMap();
                     map.putString("uri", "file://" + file.getAbsolutePath());
+
+                    promise.resolve(map);
+                    Log.d(TAG, "📸 [capture/callback] Capture result: " + map.toString());
                     
                     emitPictureSaved(map);
                     Log.d(TAG, "📸 [capture/callback] Emit onPictureSaved");
-                    promise.resolve(map);
-
+                    return;
                 } catch (IOException e) {
                     Log.e(TAG, "⛔ [capture/callback] Lỗi lưu ảnh: " + e.getMessage(), e);
                     emitError("Error saving picture: " + e.getMessage());
