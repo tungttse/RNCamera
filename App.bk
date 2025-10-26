@@ -11,8 +11,7 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-// import { SevenMDCamera } from './SevenMDCamera';
-import { Camera, useCameraDevice } from 'react-native-vision-camera';
+import { SevenMDCamera } from './SevenMDCamera';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -26,47 +25,48 @@ function App() {
 }
 
 function AppContent() {
-
+  const safeAreaInsets = useSafeAreaInsets();
   const cameraRef = React.useRef(null);
-  const device = useCameraDevice('back')
-  console.log(device);
-  console.log(cameraRef.current);
+
+  const handleCapture = () => {
+    if (cameraRef.current) {
+      // @ts-ignore
+      Alert.alert("capture");
+      cameraRef.current.takePhoto();
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <Camera
-        ref={cameraRef}
-        device={device!}
-        isActive={true}
-        style={{ flex: 1 }}
-      />
-      <View style={styles.overlay}>
+      <View style={styles.textContainer}>
         <Text style={styles.welcomeText}>Welcome to React Native!</Text>
         <Text style={styles.subtitleText}>This is your custom text on the screen</Text>
       </View>
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.captureButton} onPress={() => {
-          console.log("capture");
-        }}>
+        <TouchableOpacity style={styles.captureButton} onPress={handleCapture}>
           <Text style={styles.captureButtonText}>Capture Photo</Text>
         </TouchableOpacity>
       </View>
-
+      <SevenMDCamera
+        ref={cameraRef}
+        style={{ flex: 1 }}
+        onCameraReady={() => console.log("ready")}
+        onPictureSaved={(e) => Alert.alert("saved:", e.nativeEvent.path)}
+      />
+      
+    
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    position: 'relative',
   },
-  overlay: {
-    position: 'absolute',
-    top: 100,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 10,
-    borderRadius: 8,
+  textContainer: {
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
   },
   welcomeText: {
     fontSize: 24,
